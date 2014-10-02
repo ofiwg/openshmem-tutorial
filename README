@@ -1,0 +1,55 @@
+This is a tutorial for building a simple OpenSHMEM implementation
+
+For more information, see the presentation:
+
+docs/OPENSHMEM-Tutorial.pptx
+
+Quick Start
+-----------
+sh autogen.sh
+
+This tutorial relies on PMI as a job launch library.
+MPICH installations and libraries generally have libraries
+
+------ Example Build Script -------
+#!/bin/sh
+INSTALL_DIR=<path to stage executables>
+SFI=<path_to_sfi>
+PMILIBNAME=<MPI library name>
+PMI_LIB=<path to mpi library with a pmi.so>
+PMI_INCLUDE=<path to pmi.h>
+./configure                           \
+    --prefix=${INSTALL_DIR}           \
+    --with-fabric=${SFI}              \
+    --with-pmi-name=${PMI_LIBNAME}    \
+    --with-pmi-lib=${PMI_LIB}         \
+make; make install
+------ End Build Script -------
+
+To run sping:
+
+mpiexec -np 2 ./sping
+Note, that depending on how you built sping, you may need to set an env var.
+
+PMI_MODULE=libmpi.so by default.
+This points to a library that implements the PMI interface.  Usually libraries
+like MPICH have this.  So libmpi.so needs to be in your LD_LIBRARY_PATH, or you
+need to set PMI_MODULE=<PATH_TO_MPI>/libmpich.so or to any library that implements PMI.
+
+General Layout
+--------------
+(Tutorial Files, the example code, these are the interesting tutorial code):
+./src/shmem_impl.h       -- Shmem library implementation header
+./src/shmem.c            -- Shmem library implementation code
+
+(reference implementation files from:
+http://bongo.cs.uh.edu/site/Downloads/Source):
+./src/shmem.h            -- Reference implementation header
+./examples/sping.c       -- Reference implementation test case
+
+(Process manager/job launcher utility code):
+./src/pm/pmi/shmem_pmi.c  -- Process manager glue code
+./src/pm/pmi/pmitest.c    -- Test case for process manager (not installed by default)
+./src/pm/pmi/pmi_loader.h -- Dynamic loader for libpmi.so
+./src/pm/shmem_pm.h       -- Process manager code, interfaces used by shmem
+
