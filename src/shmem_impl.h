@@ -430,7 +430,7 @@ int SHMEMI_send(void *buf, size_t len, int dest, request_t *req)
   uint64_t match_bits   = _g.rank+1000;
   req->cb               = SHMEMI_Send_cb;
   req->done             = 0;
-  ERRCHKSFI(fi_tsendto(_g.endpoint_tag,buf,len,_g.mr,
+  ERRCHKSFI(fi_tsend(_g.endpoint_tag,buf,len,_g.mr,
                        dest,match_bits,(void*)&req->context));
   return 0;
 }
@@ -442,7 +442,7 @@ int SHMEMI_recv(void *buf, size_t len, int dest, request_t *req)
   uint64_t   ignore_bits = 0;
   req->cb                = SHMEMI_Recv_cb;
   req->done              = 0;
-  ERRCHKSFI(fi_trecvfrom(_g.endpoint_tag,buf,len,_g.mr,dest,
+  ERRCHKSFI(fi_trecv(_g.endpoint_tag,buf,len,_g.mr,dest,
                          match_bits,ignore_bits,(void*)&req->context));
   return 0;
 }
@@ -713,7 +713,7 @@ void SHMEMI_Long_put (long       *dest,
                       size_t      nelems,
                       int         pe)
 {
-  ERRCHKSFI(fi_writeto(_g.endpoint,         /* Endpoint            */
+  ERRCHKSFI(fi_write(_g.endpoint,         /* Endpoint            */
                        src,                 /* Origin buffer       */
                        nelems*sizeof(long), /* buffer size         */
                        _g.mr,               /* Memory region       */
