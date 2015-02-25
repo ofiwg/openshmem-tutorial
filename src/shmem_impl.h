@@ -68,7 +68,7 @@
 
 #define __SI__ __attribute__((always_inline)) static inline
 
-#define EPNAMELEN  8
+#define EPNAMELEN  16
 
 /* ************************************************************************** */
 /* Type Definitions                                                           */
@@ -303,36 +303,35 @@ void SHMEMI_Start_pes(int npes)
   /* **************************************************** */
   /* Bind the counters and CQ to the endpoint             */
   /* **************************************************** */
-  ERRCHKSFI(fi_bind(&_g.endpoint->fid,    /* Enable for remote write         */
+  ERRCHKSFI(fi_ep_bind(_g.endpoint,    /* Enable for remote write         */
                     &_g.putcntr->fid,
                     FI_WRITE));
 
-  ERRCHKSFI(fi_bind(&_g.endpoint->fid,    /* Enable endpoint for remote read   */
+  ERRCHKSFI(fi_ep_bind(_g.endpoint,    /* Enable endpoint for remote read   */
                     &_g.getcntr->fid,
                     FI_READ));
 
-  ERRCHKSFI(fi_bind(&_g.endpoint->fid,     /* Enable CQ for writing and disable */
+  ERRCHKSFI(fi_ep_bind(_g.endpoint,     /* Enable CQ for writing and disable */
                     &_g.cq->fid,           /* events by default                 */
                     FI_WRITE | FI_EVENT));
 
-  ERRCHKSFI(fi_bind(&_g.endpoint_tag->fid, /* Enable CQ for sends/recv          */
+  ERRCHKSFI(fi_ep_bind(_g.endpoint_tag, /* Enable CQ for sends/recv          */
                     &_g.cq_tag->fid,
                     FI_SEND | FI_RECV));
 
-  ERRCHKSFI(fi_bind(&_g.endpoint->fid,     /* Enable AV                         */
+  ERRCHKSFI(fi_ep_bind(_g.endpoint,     /* Enable AV                         */
                     &_g.av->fid,
                     0));
 
-  ERRCHKSFI(fi_bind(&_g.endpoint_tag->fid, /* Enable AV                         */
+  ERRCHKSFI(fi_ep_bind(_g.endpoint_tag, /* Enable AV                         */
                     &_g.av->fid,
                     0));
 
-  ERRCHKSFI(fi_bind(&_g.mr->fid,           /* Bind target counter to memory region */
+  ERRCHKSFI(fi_mr_bind(_g.mr,           /* Bind target counter to memory region */
                     &_g.targetcntr->fid,
                     FI_REMOTE_READ|FI_REMOTE_WRITE));
 
-
-  ERRCHKSFI(fi_bind(&_g.endpoint->fid,     /* Bind memory region to endpoint */
+  ERRCHKSFI(fi_ep_bind(_g.endpoint,     /* Bind memory region to endpoint */
                     &_g.mr->fid,
                     FI_REMOTE_READ|FI_REMOTE_WRITE));
 
@@ -360,12 +359,12 @@ void SHMEMI_Start_pes(int npes)
   /* The addressing mode is logical so destinations can   */
   /* be addressed by index                                */
   /* **************************************************** */
-  ERRCHKSFI(fi_av_insert(_g.av,    /* Address vector                          */
+  fi_av_insert(_g.av,    /* Address vector                          */
                          addrNames,/* Array of address names, size of addrlen */
                          _g.size,  /* Count of addresses                      */
                          NULL,     /* Output addresses, unused in logical     */
                          0,        /* FLAGS:  none required                   */
-                         NULL));   /* Contextual information (optional)       */
+                         NULL);   /* Contextual information (optional)       */
 
   free(addrNames);
   fi_freeinfo(p_info);
