@@ -296,7 +296,7 @@ void SHMEMI_Start_pes(int npes)
                       FI_REMOTE_WRITE,
                       0,                 /* In:  offset                    */
                       0ULL,              /* In:  requested key             */
-                      0,                 /* In:  ?????*/
+                      FI_MR_KEY,         /* In:  flags                     */
                       &_g.mr,            /* Out: memregion object          */
                       NULL));            /* Context: memregion events      */
 
