@@ -359,12 +359,13 @@ void SHMEMI_Start_pes(int npes)
   /* The addressing mode is logical so destinations can   */
   /* be addressed by index                                */
   /* **************************************************** */
-  fi_av_insert(_g.av,    /* Address vector                          */
-                         addrNames,/* Array of address names, size of addrlen */
-                         _g.size,  /* Count of addresses                      */
-                         NULL,     /* Output addresses, unused in logical     */
-                         0,        /* FLAGS:  none required                   */
-                         NULL);   /* Contextual information (optional)       */
+  int num_inserted;
+  num_inserted=fi_av_insert(_g.av,    /* Address vector                          */
+                            addrNames,/* Array of address names, size of addrlen */
+                            _g.size,  /* Count of addresses                      */
+                            NULL,     /* Output addresses, unused in logical     */
+                            0,        /* FLAGS:  none required                   */
+                            NULL);    /* Contextual information (optional)        */
 
   free(addrNames);
   fi_freeinfo(p_info);
