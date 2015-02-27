@@ -46,6 +46,7 @@
 #include <sys/mman.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <assert.h>
 #include <rdma/fabric.h>
 #include <rdma/fi_endpoint.h>
 #include <rdma/fi_domain.h>
@@ -79,12 +80,10 @@ typedef struct global_t
   struct fid_fabric *fabric;
   struct fid_domain *domain;
   struct fid_ep     *endpoint;
-  struct fid_ep     *endpoint_tag;
   struct fid_cntr   *putcntr;
   struct fid_cntr   *getcntr;
   struct fid_cntr   *targetcntr;
   struct fid_cq     *cq;
-  struct fid_cq     *cq_tag;
   struct fid_av     *av;
   struct fid_mr     *mr;
   char               epname[EPNAMELEN];
@@ -110,7 +109,6 @@ typedef struct request
 /* General Completion Entry */
 typedef union completion_entry
 {
-  struct fi_cq_entry        rma;    /* RMA completion entry    */
   struct fi_cq_tagged_entry tagged; /* Tagged completion entry */
 }completion_entry_t;
 
@@ -139,18 +137,22 @@ void SHMEMI_Start_pes(int npes)
   size_t epnamelen = sizeof(_g.epname);
 
   struct fi_info        *p_info     = NULL;
-  struct fi_info        *p_info_tag = NULL;
   struct fi_info         hints;
   struct fi_cq_attr      cq_attr;
   struct fi_av_attr      av_attr;
   struct fi_cntr_attr    cntr_attr;
   struct fi_domain_attr  domain_attr;
-
+  struct fi_tx_attr      tx_attr;
+  struct fi_rx_attr      rx_attr;
+  struct fi_ep_attr      ep_attr;
   memset(&hints,      0, sizeof(hints));
   memset(&cq_attr,    0, sizeof(cq_attr));
   memset(&av_attr,    0, sizeof(av_attr));
   memset(&cntr_attr,  0, sizeof(cntr_attr));
   memset(&domain_attr,0, sizeof(domain_attr));
+  memset(&tx_attr,0, sizeof(tx_attr));
+  memset(&rx_attr,0, sizeof(rx_attr));
+  memset(&ep_attr,0, sizeof(ep_attr));
 
   /* ************************************* */
   /* Initialize job launch runtime         */
@@ -162,14 +164,16 @@ void SHMEMI_Start_pes(int npes)
   /*  See man fi_getinfo for a list        */
   /*  of all filters                       */
   /* ************************************* */
-  hints.mode      = FI_CONTEXT;
-  hints.ep_type   = FI_EP_RDM;          /* reliable connectionless */
+  hints.mode          = FI_CONTEXT;
+  hints.ep_attr       = &ep_attr;
+  hints.ep_attr->type = FI_EP_RDM;      /* reliable connectionless */
 
   /* ************************************* */
   /* Endpoint capabilities to request      */
   /* ************************************* */
   hints.caps      = FI_RMA;             /* request rma capability  */
-  hints.caps     |= FI_REMOTE_COMPLETE; /* remote completion       */
+  hints.caps     |= FI_TAGGED;          /* Tagged operation        */
+  hints.caps     |= FI_REMOTE_COMPLETE; /* Remote completion       */
 
   /* ************************************* */
   /* Default flags to set on any endpoints */
@@ -178,9 +182,15 @@ void SHMEMI_Start_pes(int npes)
   /* ************************************* */
   /* Domain attributes                     */
   /* ************************************* */
-  hints.caps     |= FI_DYNAMIC_MR;    /* Allow dynamic registration of any memory */
+  hints.caps                |= FI_DYNAMIC_MR;    /* Allow dynamic registration of any memory */
+
   domain_attr.data_progress  = FI_PROGRESS_AUTO; /* Provider makes progress without calls    */
-  hints.domain_attr = &domain_attr;
+  hints.domain_attr          = &domain_attr;
+
+  tx_attr.op_flags = FI_REMOTE_COMPLETE; /* Disable completions, FI_COMPLETION is not set */
+  rx_attr.op_flags = 0;                  /* Disable completions, FI_COMPLETION is not set */
+  hints.tx_attr    = &tx_attr;
+  hints.rx_attr    = &rx_attr;
 
   /* *************************************************** */
   /* fi_getinfo:  returns information about fabric       */
@@ -194,17 +204,6 @@ void SHMEMI_Start_pes(int npes)
                        FI_SOURCE,       /* Flag:  node/service specify local address */
                        &hints,          /* In:  Hints to filter available providers  */
                        &p_info));       /* Out: List of providers that match hints   */
-
-  /* Tagged provider */
-  hints.caps      =FI_TAGGED;
-  hints.caps     |=FI_BUFFERED_RECV;
-  hints.caps     |=FI_REMOTE_COMPLETE;
-  ERRCHKSFI(fi_getinfo(FI_VERSION(1,0),  /* Interface version requested               */
-                       NULL,             /* Optional name or fabric to resolve        */
-                       "0",              /* Service name or port number to request    */
-                       FI_SOURCE,        /* Flag:  node/service specify local address */
-                       &hints,           /* In:  Hints to filter available providers  */
-                       &p_info_tag));    /* Out: List of providers that match hints   */
 
   /* **************************************************** */
   /* The provider info struct returns a fabric attribute  */
@@ -223,10 +222,10 @@ void SHMEMI_Start_pes(int npes)
   /* ports.  Returns a domain object that can be used     */
   /* to create endpoints.  See man fi_domain for details  */
   /* **************************************************** */
-  ERRCHKSFI(fi_domain(_g.fabric,            /* In:  Fabric object             */
-                      p_info,  /* In:  default domain attributes */
-                      &_g.domain,           /* Out: domain object             */
-                      NULL));               /* Context: Domain events         */
+  ERRCHKSFI(fi_domain(_g.fabric,  /* In:  Fabric object             */
+                      p_info,     /* In:  default domain attributes */
+                      &_g.domain, /* Out: domain object             */
+                      NULL));     /* Context: Domain events         */
 
   /* **************************************************** */
   /* Create a transport level communication endpoint.     */
@@ -240,11 +239,6 @@ void SHMEMI_Start_pes(int npes)
                         p_info,              /* In: Configuration object */
                         &_g.endpoint,        /* Out: Endpoint Object     */
                         NULL));              /* Context: endpoint events */
-  ERRCHKSFI(fi_endpoint(_g.domain,           /* In: Domain Object        */
-                        p_info_tag,          /* In: Configuration object */
-                        &_g.endpoint_tag,    /* Out: Endpoint Object     */
-                        NULL));              /* Context: endpoint events */
-
   /* **************************************************** */
   /* First, create the objects that will be bound to the  */
   /* endpoint.  The objects include:                      */
@@ -270,18 +264,11 @@ void SHMEMI_Start_pes(int npes)
                          &_g.targetcntr,   /* Out: Counter Object       */
                          NULL));           /* Context: counter events   */
 
-  cq_attr.format    = FI_CQ_FORMAT_CONTEXT;
-  cq_attr.size      = 1000;
+  cq_attr.format    = FI_CQ_FORMAT_TAGGED;
   ERRCHKSFI(fi_cq_open(_g.domain,        /* In:  Domain Object        */
                        &cq_attr,         /* In:  Configuration object */
                        &_g.cq,           /* Out: CQ Object            */
                        NULL));            /* Context: CQ events       */
-
-  cq_attr.format    = FI_CQ_FORMAT_TAGGED;
-  ERRCHKSFI(fi_cq_open(_g.domain,        /* In:  Domain Object         */
-                       &cq_attr,         /* In:  Configuration object  */
-                       &_g.cq_tag,       /* Out: CQ Object             */
-                       NULL));           /* Context: CQ events         */
 
   av_attr.type   = FI_AV_TABLE;      /* Logical addressing mode    */
   ERRCHKSFI(fi_av_open(_g.domain,    /* In:  Domain Object         */
@@ -300,9 +287,6 @@ void SHMEMI_Start_pes(int npes)
                       &_g.mr,            /* Out: memregion object          */
                       NULL));            /* Context: memregion events      */
 
-  /* **************************************************** */
-  /* Bind the counters and CQ to the endpoint             */
-  /* **************************************************** */
   ERRCHKSFI(fi_ep_bind(_g.endpoint,    /* Enable for remote write         */
                     &_g.putcntr->fid,
                     FI_WRITE));
@@ -311,19 +295,11 @@ void SHMEMI_Start_pes(int npes)
                     &_g.getcntr->fid,
                     FI_READ));
 
-  ERRCHKSFI(fi_ep_bind(_g.endpoint,     /* Enable CQ for writing and disable */
-                    &_g.cq->fid,           /* events by default                 */
-                    FI_WRITE | FI_EVENT));
-
-  ERRCHKSFI(fi_ep_bind(_g.endpoint_tag, /* Enable CQ for sends/recv          */
-                    &_g.cq_tag->fid,
-                    FI_SEND | FI_RECV));
+  ERRCHKSFI(fi_ep_bind(_g.endpoint,        /* Enable CQ for writing and disable */
+                       &_g.cq->fid,        /* events by default                 */
+                       FI_SEND|FI_RECV|FI_COMPLETION));
 
   ERRCHKSFI(fi_ep_bind(_g.endpoint,     /* Enable AV                         */
-                    &_g.av->fid,
-                    0));
-
-  ERRCHKSFI(fi_ep_bind(_g.endpoint_tag, /* Enable AV                         */
                     &_g.av->fid,
                     0));
 
@@ -339,8 +315,6 @@ void SHMEMI_Start_pes(int npes)
   /* Enable the endpoints for communication               */
   /* **************************************************** */
   ERRCHKSFI(fi_enable(_g.endpoint));
-  ERRCHKSFI(fi_enable(_g.endpoint_tag));
-
 
   /* **************************************************** */
   /* Exchange endpoint addresses using scalable database  */
@@ -369,7 +343,6 @@ void SHMEMI_Start_pes(int npes)
 
   free(addrNames);
   fi_freeinfo(p_info);
-  fi_freeinfo(p_info_tag);
 
   SHMEMI_PM_Barrier();
 }
@@ -397,13 +370,6 @@ int SHMEMI_poll()
   assert(ret >= 0);
   if(ret > 0)
     {
-      req = (request_t*)entry.rma.op_context;
-      req->cb(req);
-    }
-  ret = fi_cq_read(_g.cq_tag,(void*)&entry,1);
-  assert(ret >= 0);
-  if(ret > 0)
-    {
       req = (request_t*)entry.tagged.op_context;
       req->cb(req);
     }
@@ -427,23 +393,43 @@ int SHMEMI_Recv_cb(request_t* req)
 __SI__
 int SHMEMI_send(void *buf, size_t len, int dest, request_t *req)
 {
-  uint64_t match_bits   = _g.rank+1000;
-  req->cb               = SHMEMI_Send_cb;
-  req->done             = 0;
-  ERRCHKSFI(fi_tsend(_g.endpoint_tag,buf,len,_g.mr,
-                       dest,match_bits,(void*)&req->context));
+  struct fi_msg_tagged msg;
+  struct iovec         iov;
+  uint64_t match_bits = _g.rank+1000;
+  req->cb             = SHMEMI_Send_cb;
+  req->done           = 0;
+  iov.iov_base        = buf;
+  iov.iov_len         = len;
+  msg.msg_iov         = &iov;
+  msg.desc            = NULL;
+  msg.iov_count       = 1;
+  msg.addr            = dest;
+  msg.tag             = match_bits;
+  msg.context         = (void*)&req->context;
+  ERRCHKSFI(fi_tsendmsg(_g.endpoint,&msg,FI_COMPLETION));
   return 0;
 }
 
 __SI__
 int SHMEMI_recv(void *buf, size_t len, int dest, request_t *req)
 {
-  uint64_t   match_bits  = dest+1000;
-  uint64_t   ignore_bits = 0;
-  req->cb                = SHMEMI_Recv_cb;
-  req->done              = 0;
-  ERRCHKSFI(fi_trecv(_g.endpoint_tag,buf,len,_g.mr,dest,
-                         match_bits,ignore_bits,(void*)&req->context));
+  struct fi_msg_tagged msg;
+  struct iovec         iov;
+  uint64_t match_bits  = dest+1000;
+  uint64_t ignore_bits = 0;
+  req->cb              = SHMEMI_Recv_cb;
+  req->done            = 0;
+  iov.iov_base         = buf;
+  iov.iov_len          = len;
+  msg.msg_iov          = &iov;
+  msg.desc             = NULL;
+  msg.iov_count        = 1;
+  msg.addr             = dest;
+  msg.tag              = match_bits;
+  msg.ignore           = ignore_bits;
+  msg.context          = (void*)&req->context;
+
+  ERRCHKSFI(fi_trecvmsg(_g.endpoint,&msg,FI_COMPLETION));
   return 0;
 }
 
