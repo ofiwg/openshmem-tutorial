@@ -71,7 +71,7 @@ void SHMEMI_Encode(const void *in, int inlen, char *out, int outlen)
   for (i = 0; i < inlen; i++)
     {
       out[i*2+0] = hex[(bin[i])&0xF];
-      out[i*2+1] = hex[(bin[i]>>4)];
+      out[i*2+1] = hex[((bin[i]&0xF0)>>4)];
     }
   out[inlen * 2] = 0;
 }
@@ -85,7 +85,7 @@ int SHMEMI_Decode(const char *in, void *out, int outlen)
   uint8_t *val = (uint8_t*)out;
   for (i = 0 ; i < outlen ; ++i) {
     char c[4] = {in[i*2], '\0', in[i*2+1], '\0'};
-    val[i]    = atoi(&c[0]) | atoi(&c[2])<<4;
+    val[i]    = strtoll(&c[0],NULL,16) | (strtoll(&c[2],NULL,16)<<4&0xF0);
   }
   return 0;
 }
