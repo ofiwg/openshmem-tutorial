@@ -95,7 +95,7 @@ extern global_t _g;
 
 struct request;
 
-/* SFI Callback structure */
+/* OFI Callback structure */
 typedef int (*callback_fn)  (struct request*);
 
 /* Request object for tagged send/recv */
@@ -116,13 +116,24 @@ typedef union completion_entry
 /* ************************************************************************** */
 /* Error checking macros                                                      */
 /* ************************************************************************** */
-#define ERRCHKSFI(ret)                                                  \
+#define ERRCHKOFI(ret)                                                  \
   if(ret != 0)                                                          \
     {                                                                   \
-      fprintf(stderr, "SFI Error Line %d:%d \"%s\"\n", __LINE__,(int)ret,fi_strerror(-ret)); \
+      fprintf(stderr, "OFI Error Line %d:%d \"%s\"\n", __LINE__,(int)ret,fi_strerror(-ret)); \
       exit(-1);                                                         \
     }
 
+#define COMMOFI(FUNC)                                             \
+  do                                                              \
+    {                                                             \
+      ssize_t _ret;                                               \
+      do {                                                        \
+        _ret = FUNC;                                              \
+        if(_ret==0) break;                                        \
+        if(_ret!=-FI_EAGAIN) assert(0);                           \
+        SHMEMI_poll();                                            \
+      } while (_ret == -FI_EAGAIN);                               \
+    } while (0)
 
 __SI__
 void SHMEMI_Finalize(void)
@@ -171,9 +182,8 @@ void SHMEMI_Start_pes(int npes)
   /* ************************************* */
   /* Endpoint capabilities to request      */
   /* ************************************* */
-  hints.caps      = FI_RMA;             /* request rma capability  */
-  hints.caps     |= FI_TAGGED;          /* Tagged operation        */
-  hints.caps     |= FI_REMOTE_COMPLETE; /* Remote completion       */
+  hints.caps      = FI_RMA;               /* request rma capability  */
+  hints.caps     |= FI_TAGGED;            /* Tagged operation        */
 
   /* ************************************* */
   /* Default flags to set on any endpoints */
@@ -182,13 +192,13 @@ void SHMEMI_Start_pes(int npes)
   /* ************************************* */
   /* Domain attributes                     */
   /* ************************************* */
-  hints.caps                |= FI_DYNAMIC_MR;    /* Allow dynamic registration of any memory */
 
   domain_attr.data_progress  = FI_PROGRESS_AUTO; /* Provider makes progress without calls    */
+  domain_attr.mr_mode        = FI_MR_SCALABLE;
   hints.domain_attr          = &domain_attr;
 
-  tx_attr.op_flags = FI_REMOTE_COMPLETE; /* Disable completions, FI_COMPLETION is not set */
-  rx_attr.op_flags = 0;                  /* Disable completions, FI_COMPLETION is not set */
+  tx_attr.op_flags = FI_DELIVERY_COMPLETE; /* Disable completions, FI_COMPLETION is not set */
+  rx_attr.op_flags = 0;                    /* Disable completions, FI_COMPLETION is not set */
   hints.tx_attr    = &tx_attr;
   hints.rx_attr    = &rx_attr;
 
@@ -198,7 +208,7 @@ void SHMEMI_Start_pes(int npes)
   /* This does not necessarily allocate resources, but   */
   /* provides a list of services for the fabric          */
   /* *************************************************** */
-  ERRCHKSFI(fi_getinfo(FI_VERSION(1,0), /* Interface version requested               */
+  ERRCHKOFI(fi_getinfo(FI_VERSION(1,0), /* Interface version requested               */
                        NULL,            /* Optional name or fabric to resolve        */
                        "0",             /* Service name or port number to request    */
                        FI_SOURCE,       /* Flag:  node/service specify local address */
@@ -212,7 +222,7 @@ void SHMEMI_Start_pes(int npes)
   /* We choose the first available fabric, but getinfo    */
   /* returns a list.  see man fi_fabric for details       */
   /* **************************************************** */
-  ERRCHKSFI(fi_fabric(p_info->fabric_attr,  /* In:   Fabric attributes */
+  ERRCHKOFI(fi_fabric(p_info->fabric_attr,  /* In:   Fabric attributes */
                       &_g.fabric,           /* Out:  Fabric descriptor */
                       NULL));               /* Context: fabric events  */
 
@@ -222,7 +232,7 @@ void SHMEMI_Start_pes(int npes)
   /* ports.  Returns a domain object that can be used     */
   /* to create endpoints.  See man fi_domain for details  */
   /* **************************************************** */
-  ERRCHKSFI(fi_domain(_g.fabric,  /* In:  Fabric object             */
+  ERRCHKOFI(fi_domain(_g.fabric,  /* In:  Fabric object             */
                       p_info,     /* In:  default domain attributes */
                       &_g.domain, /* Out: domain object             */
                       NULL));     /* Context: Domain events         */
@@ -235,7 +245,7 @@ void SHMEMI_Start_pes(int npes)
   /* counters, completion queues, etc                     */
   /* see man fi_endpoint for more details                 */
   /* **************************************************** */
-  ERRCHKSFI(fi_endpoint(_g.domain,           /* In: Domain Object        */
+  ERRCHKOFI(fi_endpoint(_g.domain,           /* In: Domain Object        */
                         p_info,              /* In: Configuration object */
                         &_g.endpoint,        /* Out: Endpoint Object     */
                         NULL));              /* Context: endpoint events */
@@ -249,78 +259,78 @@ void SHMEMI_Start_pes(int npes)
   /*     * memory region for symmetric heap               */
   /* **************************************************** */
   cntr_attr.events   = FI_CNTR_EVENTS_COMP;
-  ERRCHKSFI(fi_cntr_open(_g.domain,   /* In:  Domain Object        */
+  ERRCHKOFI(fi_cntr_open(_g.domain,   /* In:  Domain Object        */
                          &cntr_attr,  /* In:  Configuration object */
                          &_g.putcntr, /* Out: Counter Object       */
                          NULL));      /* Context: counter events   */
 
-  ERRCHKSFI(fi_cntr_open(_g.domain,   /* In:  Domain Object        */
+  ERRCHKOFI(fi_cntr_open(_g.domain,   /* In:  Domain Object        */
                          &cntr_attr,  /* In:  Configuration object */
                          &_g.getcntr, /* Out: Counter Object       */
                          NULL));      /* Context: counter events   */
 
-  ERRCHKSFI(fi_cntr_open(_g.domain,        /* In:  Domain Object        */
+  ERRCHKOFI(fi_cntr_open(_g.domain,        /* In:  Domain Object        */
                          &cntr_attr,       /* In:  Configuration object */
                          &_g.targetcntr,   /* Out: Counter Object       */
                          NULL));           /* Context: counter events   */
 
   cq_attr.format    = FI_CQ_FORMAT_TAGGED;
-  ERRCHKSFI(fi_cq_open(_g.domain,        /* In:  Domain Object        */
+  ERRCHKOFI(fi_cq_open(_g.domain,        /* In:  Domain Object        */
                        &cq_attr,         /* In:  Configuration object */
                        &_g.cq,           /* Out: CQ Object            */
                        NULL));            /* Context: CQ events       */
 
   av_attr.type   = FI_AV_TABLE;      /* Logical addressing mode    */
-  ERRCHKSFI(fi_av_open(_g.domain,    /* In:  Domain Object         */
+  ERRCHKOFI(fi_av_open(_g.domain,    /* In:  Domain Object         */
                        &av_attr,     /* In:  Configuration object  */
                        &_g.av,       /* Out: AV Object             */
                        NULL));       /* Context: AV events         */
 
-  ERRCHKSFI(fi_mr_reg(_g.domain,         /* In:  Domain Object            */
+  ERRCHKOFI(fi_mr_reg(_g.domain,         /* In:  Domain Object            */
                       0,                 /* In:  Lower address            */
                       UINT64_MAX,        /* In:  Upper address            */
                       FI_REMOTE_READ |   /* In:  Expose MR for read/write */
                       FI_REMOTE_WRITE,
                       0,                 /* In:  offset                    */
                       0ULL,              /* In:  requested key             */
-                      FI_MR_KEY,         /* In:  flags                     */
+                      0,                 /* In:  flags                     */
                       &_g.mr,            /* Out: memregion object          */
                       NULL));            /* Context: memregion events      */
 
-  ERRCHKSFI(fi_ep_bind(_g.endpoint,    /* Enable for remote write         */
+  ERRCHKOFI(fi_ep_bind(_g.endpoint,    /* Enable for remote write         */
                     &_g.putcntr->fid,
                     FI_WRITE));
 
-  ERRCHKSFI(fi_ep_bind(_g.endpoint,    /* Enable endpoint for remote read   */
+  ERRCHKOFI(fi_ep_bind(_g.endpoint,    /* Enable endpoint for remote read   */
                     &_g.getcntr->fid,
                     FI_READ));
 
-  ERRCHKSFI(fi_ep_bind(_g.endpoint,        /* Enable CQ for writing and disable */
+  ERRCHKOFI(fi_ep_bind(_g.endpoint,        /* Enable CQ for writing and disable */
                        &_g.cq->fid,        /* events by default                 */
-                       FI_SEND|FI_RECV|FI_COMPLETION));
+                       FI_SEND|FI_RECV|FI_SELECTIVE_COMPLETION));
 
-  ERRCHKSFI(fi_ep_bind(_g.endpoint,     /* Enable AV                         */
+  ERRCHKOFI(fi_ep_bind(_g.endpoint,     /* Enable AV                         */
                     &_g.av->fid,
                     0));
 
-  ERRCHKSFI(fi_mr_bind(_g.mr,           /* Bind target counter to memory region */
+  ERRCHKOFI(fi_mr_bind(_g.mr,           /* Bind target counter to memory region */
                     &_g.targetcntr->fid,
                     FI_REMOTE_READ|FI_REMOTE_WRITE));
 
-  ERRCHKSFI(fi_ep_bind(_g.endpoint,     /* Bind memory region to endpoint */
+  ERRCHKOFI(fi_ep_bind(_g.endpoint,     /* Bind memory region to endpoint */
                     &_g.mr->fid,
                     FI_REMOTE_READ|FI_REMOTE_WRITE));
 
   /* **************************************************** */
   /* Enable the endpoints for communication               */
   /* **************************************************** */
-  ERRCHKSFI(fi_enable(_g.endpoint));
+  ERRCHKOFI(fi_enable(_g.endpoint));
 
   /* **************************************************** */
   /* Exchange endpoint addresses using scalable database  */
   /* or job launcher, in this case, use interfaces        */
   /* **************************************************** */
-  ERRCHKSFI(fi_getname((fid_t)_g.endpoint, _g.epname, &epnamelen));
+  ERRCHKOFI(fi_getname((fid_t)_g.endpoint, _g.epname, &epnamelen));
   assert(epnamelen <= sizeof(_g.epname));
 
   char *addrNames = (char*)malloc(_g.size*epnamelen);
@@ -367,12 +377,16 @@ int SHMEMI_poll()
   request_t   *req;
 
   ret = fi_cq_read(_g.cq,(void*)&entry,1);
-  assert(ret >= 0);
   if(ret > 0)
     {
       req = (request_t*)entry.tagged.op_context;
       req->cb(req);
     }
+  else if(ret == -FI_EAGAIN) {
+  }
+  else {
+    assert(0);
+  }
   return 0;
 }
 
@@ -406,7 +420,7 @@ int SHMEMI_send(void *buf, size_t len, int dest, request_t *req)
   msg.addr            = dest;
   msg.tag             = match_bits;
   msg.context         = (void*)&req->context;
-  ERRCHKSFI(fi_tsendmsg(_g.endpoint,&msg,FI_COMPLETION));
+  COMMOFI(fi_tsendmsg(_g.endpoint,&msg,FI_COMPLETION));
   return 0;
 }
 
@@ -429,7 +443,7 @@ int SHMEMI_recv(void *buf, size_t len, int dest, request_t *req)
   msg.ignore           = ignore_bits;
   msg.context          = (void*)&req->context;
 
-  ERRCHKSFI(fi_trecvmsg(_g.endpoint,&msg,FI_COMPLETION));
+  COMMOFI(fi_trecvmsg(_g.endpoint,&msg,FI_COMPLETION));
   return 0;
 }
 
@@ -529,7 +543,6 @@ int SHMEMI_barrier()
       char val;
       SHMEMI_recv(&val, 1, from,&req[0]);
       SHMEMI_send(&val, 1, to, &req[1]);
-
       while(!req[0].done || !req[1].done)
         SHMEMI_poll();
     }
@@ -539,7 +552,7 @@ int SHMEMI_barrier()
 __SI__
 void SHMEMI_quiet()
 {
-  ERRCHKSFI(fi_cntr_wait(_g.putcntr,
+  ERRCHKOFI(fi_cntr_wait(_g.putcntr,
                          _g.put_ctr_pending,
                          -1));
 }
@@ -699,14 +712,14 @@ void SHMEMI_Long_put (long       *dest,
                       size_t      nelems,
                       int         pe)
 {
-  ERRCHKSFI(fi_write(_g.endpoint,         /* Endpoint            */
-                       src,                 /* Origin buffer       */
-                       nelems*sizeof(long), /* buffer size         */
-                       _g.mr,               /* Memory region       */
-                       pe,                  /* Destination Address */
-                       (uint64_t)dest,      /* Target buffer       */
-                       0ULL,                /* Key                 */
-                       NULL));
+  COMMOFI(fi_write(_g.endpoint,         /* Endpoint            */
+                   src,                 /* Origin buffer       */
+                   nelems*sizeof(long), /* buffer size         */
+                   _g.mr,               /* Memory region       */
+                   pe,                  /* Destination Address */
+                   (uint64_t)dest,      /* Target buffer       */
+                   0ULL,                /* Key                 */
+                   NULL));
 
   _g.put_ctr_pending++;
   SHMEMI_quiet();
@@ -721,7 +734,7 @@ void SHMEMI_Wait (long *ivar,long  cmp_value)
       count = fi_cntr_read(_g.targetcntr);
       asm volatile("" ::: "memory");
       if (*(ivar) != cmp_value) return;
-      ERRCHKSFI(fi_cntr_wait(_g.targetcntr,
+      ERRCHKOFI(fi_cntr_wait(_g.targetcntr,
                              (count + 1),
                              -1));
 
